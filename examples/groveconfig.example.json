@@ -1,0 +1,10 @@
+{
+  "//": "Drop at <repo>/.groveconfig.json, or globally at ~/.config/grove/config.json (%APPDATA%\\grove\\config.json on Windows).",
+  "path_template": "{parent}/{repo}.{slug}",
+  "port_base": 40000,
+  "port_span": 20000,
+  "cache_strategy": "hardlink",
+  "default_base": "main",
+  "auto_prune": true,
+  "include_main_in_foreach": false
+}
