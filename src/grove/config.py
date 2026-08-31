@@ -179,9 +179,6 @@ def render_path_template(
         rendered = template.format_map(_SafeDict(**fields))
     except KeyError as exc:  # pragma: no cover - _SafeDict raises GroveError
         raise GroveError(str(exc)) from exc
-    # An empty {agent} may leave cosmetic artifacts ("--", ".."); tidy them.
-    rendered = re.sub(r"[-_]{2,}", "-", rendered)
-    rendered = rendered.replace("/./", "/")
     if not os.path.isabs(rendered):
         rendered = os.path.join(parent, rendered)
     return os.path.normpath(rendered)

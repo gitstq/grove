@@ -46,6 +46,16 @@ class TestTemplate(unittest.TestCase):
         with self.assertRaises(GroveError):
             render_path_template("{nope}", parent=".", repo="r", slug="s", branch="s")
 
+    def test_preserves_underscores_in_parent(self):
+        # Regression: a tidy regex once collapsed "-_" inside real paths.
+        p = render_path_template(
+            "{parent}/{repo}.{slug}",
+            parent="/tmp/grove-test-_o7zymzs", repo="main", slug="feat-x", branch="feat/x",
+        )
+        self.assertEqual(
+            p, os.path.normpath("/tmp/grove-test-_o7zymzs/main.feat-x")
+        )
+
 
 class TestConfig(unittest.TestCase):
     def test_invalid_strategy(self):
