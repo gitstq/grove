@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -9,6 +10,20 @@ import tempfile
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
+
+
+def force_rmtree(path):
+    """rmtree that also clears the read-only bit Git sets on object files.
+
+    Plain shutil.rmtree raises PermissionError on Windows where Git pack/object
+    files are read-only.
+    """
+
+    def on_error(func, p, _exc):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    shutil.rmtree(path, onerror=on_error)
 
 
 def git(args, cwd):
@@ -39,4 +54,4 @@ class TempRepo:
         return p
 
     def cleanup(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        force_rmtree(self.tmp)

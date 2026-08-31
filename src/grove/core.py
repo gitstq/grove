@@ -124,6 +124,16 @@ def fnv1a_32(data: str) -> int:
     return h
 
 
+def canon(path: str) -> str:
+    """Canonical path for equality across platforms.
+
+    ``realpath`` resolves symlinks (e.g. macOS ``/var`` -> ``/private/var``);
+    ``normcase`` neutralises Windows backslash/case differences so that a path
+    reported by git and one we computed always compare equal.
+    """
+    return os.path.normcase(os.path.realpath(os.path.abspath(path)))
+
+
 # --------------------------------------------------------------------------- #
 # Manager
 # --------------------------------------------------------------------------- #
@@ -136,8 +146,8 @@ class WorktreeManager:
         confirm: Optional[Callable[[str], bool]] = None,
     ):
         self.git = git or Git(cwd=cwd)
-        self.root = self.git.repo_root(cwd)
-        self.common_dir = self.git.common_dir(cwd=self.root)
+        self.root = canon(self.git.repo_root(cwd))
+        self.common_dir = canon(self.git.common_dir(cwd=self.root))
         self.config = (config or Config()).validate()
         self._confirm = confirm or (lambda _msg: True)
         self._meta_path = os.path.join(self.common_dir, META_FILENAME)
@@ -162,30 +172,32 @@ class WorktreeManager:
 
     def _set_meta(self, path: str, **values) -> None:
         meta = self._load_meta()
-        entry = meta.get(os.path.abspath(path), {})
+        key = canon(path)
+        entry = meta.get(key, {})
         entry.update(values)
-        meta[os.path.abspath(path)] = entry
+        meta[key] = entry
         self._save_meta(meta)
 
     def _drop_meta(self, path: str) -> None:
         meta = self._load_meta()
-        if os.path.abspath(path) in meta:
-            del meta[os.path.abspath(path)]
+        key = canon(path)
+        if key in meta:
+            del meta[key]
             self._save_meta(meta)
 
     # ========================================================== templates
     def _plan_path(self, branch: str, agent: str = "", explicit: Optional[str] = None) -> str:
         if explicit:
             p = explicit if os.path.isabs(explicit) else os.path.join(self.root, explicit)
-            return os.path.normpath(p)
-        return render_path_template(
+            return canon(p)
+        return canon(render_path_template(
             self.config.path_template,
             parent=os.path.dirname(self.root),
             repo=os.path.basename(self.root),
             slug=sanitize_slug(branch),
             branch=branch,
             agent=agent,
-        )
+        ))
 
     def deterministic_port(self, name: str) -> int:
         """Stable per-worktree TCP port for isolated dev servers."""
@@ -195,16 +207,17 @@ class WorktreeManager:
 
     # ============================================================== list
     def _enrich(self, pw: PorcelainWorktree, meta: Dict[str, Dict[str, object]]) -> Worktree:
+        path = canon(pw.path)
         wt = Worktree(
-            path=os.path.abspath(pw.path),
+            path=path,
             branch=pw.branch,
             head=pw.head,
             detached=pw.detached,
-            is_main=os.path.abspath(pw.path) == os.path.abspath(self.root),
+            is_main=path == self.root,
             locked=pw.locked,
             prunable=pw.prunable,
         )
-        entry = meta.get(wt.path, {})
+        entry = meta.get(path, {})
         wt.agent = str(entry.get("agent", "") or "")
         wt.name = str(entry.get("name", "") or "")
         if os.path.isdir(wt.path) and not pw.prunable:
@@ -230,11 +243,11 @@ class WorktreeManager:
         meta = self._load_meta()
         wts = [self._enrich(r, meta) for r in records] if enrich else [
             Worktree(
-                path=os.path.abspath(r.path),
+                path=canon(r.path),
                 branch=r.branch,
                 head=r.head,
                 detached=r.detached,
-                is_main=os.path.abspath(r.path) == os.path.abspath(self.root),
+                is_main=canon(r.path) == self.root,
                 locked=r.locked,
                 prunable=r.prunable,
             )
@@ -247,11 +260,11 @@ class WorktreeManager:
     def resolve(self, name_or_path: str) -> Worktree:
         """Resolve a branch name, stored name or path to a live worktree."""
         wts = self.list(enrich=False)
-        target = os.path.abspath(name_or_path) if os.path.sep in name_or_path else None
+        target = canon(name_or_path) if os.path.sep in name_or_path or os.path.isabs(name_or_path) else None
         for wt in wts:
             if wt.branch == name_or_path or wt.name == name_or_path:
                 return wt
-            if target and os.path.abspath(wt.path) == target:
+            if target and canon(wt.path) == target:
                 return wt
         # Slug / suffix match as a forgiving fallback.
         slug = sanitize_slug(name_or_path)
@@ -269,7 +282,7 @@ class WorktreeManager:
         wt = self.resolve(name_or_path)
         records = self.git.worktree_list(self.root)
         match = next(
-            (r for r in records if os.path.abspath(r.path) == os.path.abspath(wt.path)),
+            (r for r in records if canon(r.path) == wt.path),
             None,
         )
         if match is None:  # pragma: no cover - defensive against races
@@ -304,10 +317,10 @@ class WorktreeManager:
         else:
             target = self._plan_path(branch, agent, path)
 
-        if os.path.abspath(target) == os.path.abspath(self.root):
+        if canon(target) == self.root:
             raise GroveError("target path collides with the main worktree")
         for existing in self.git.worktree_list(self.root):
-            if os.path.abspath(existing.path) == os.path.abspath(target):
+            if canon(existing.path) == canon(target):
                 raise GroveError(f"a worktree already exists at {target}")
         if os.path.exists(target) and os.listdir(target):
             raise GroveError(f"target directory exists and is not empty: {target}")
@@ -393,9 +406,9 @@ class WorktreeManager:
 
     # ============================================================= prune
     def prune(self, dry_run: bool = False) -> Dict[str, object]:
-        before = {os.path.abspath(w.path) for w in self.list(enrich=False)}
+        before = {canon(w.path) for w in self.list(enrich=False)}
         res = self.git.worktree_prune(dry_run=dry_run, cwd=self.root)
-        after = {os.path.abspath(w.path) for w in self.list(enrich=False)}
+        after = {canon(w.path) for w in self.list(enrich=False)}
         dropped = sorted(before - after)
         # Clean meta entries whose directories vanished.
         meta = self._load_meta()

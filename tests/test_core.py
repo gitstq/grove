@@ -1,11 +1,10 @@
 import os
-import shutil
 import sys
 import unittest
 
-from _repo import SRC, TempRepo  # noqa: F401
+from _repo import SRC, TempRepo, force_rmtree  # noqa: F401
 from grove.config import Config
-from grove.core import WorktreeManager, fnv1a_32
+from grove.core import WorktreeManager, canon, fnv1a_32
 from grove.errors import GroveError
 from grove.git import Git
 
@@ -33,11 +32,19 @@ class TestWorktreeLifecycle(unittest.TestCase):
 
     def test_default_path_is_sibling(self):
         wt = self.m.add("feat-x")
-        self.assertEqual(
-            os.path.dirname(wt.path),
-            os.path.dirname(self.repo.path),
-        )
+        # Compare against the manager's canonical root (resolves symlinks /
+        # short names), not the possibly-aliased temp path — this is what
+        # makes path reasoning reliable on macOS (/var -> /private/var) and
+        # Windows (8.3 short names).
+        self.assertEqual(os.path.dirname(wt.path), os.path.dirname(self.m.root))
         self.assertTrue(os.path.basename(wt.path).endswith("feat-x"))
+
+    def test_symlinked_cwd_is_canonical(self):
+        link = os.path.join(self.repo.tmp, "link-to-main")
+        os.symlink(self.repo.path, link)
+        m2 = WorktreeManager(cwd=link, config=Config())
+        self.assertEqual(m2.root, canon(self.repo.path))
+        self.assertTrue(m2.list()[0].is_main)
 
     def test_dirty_detection(self):
         self.m.add("feat/dirty")
@@ -78,7 +85,7 @@ class TestWorktreeLifecycle(unittest.TestCase):
 
     def test_prune_after_manual_delete(self):
         wt = self.m.add("feat/ghost")
-        shutil.rmtree(wt.path)
+        force_rmtree(wt.path)
         report = self.m.prune()
         remaining = [w.branch for w in self.m.list(enrich=False)]
         self.assertNotIn("feat/ghost", remaining)
@@ -104,8 +111,8 @@ class TestOrchestration(unittest.TestCase):
 
     def test_share_hardlinks_cache(self):
         wt = self.m.add("feat/cache")
-        os.makedirs(os.path.join(self.repo.path, "node_modules", "lib"))
-        src_file = os.path.join(self.repo.path, "node_modules", "lib", "index.js")
+        os.makedirs(os.path.join(self.m.root, "node_modules", "lib"))
+        src_file = os.path.join(self.m.root, "node_modules", "lib", "index.js")
         with open(src_file, "w") as fh:
             fh.write("module.exports={}")
         report = self.m.share("feat/cache", ["node_modules"])
