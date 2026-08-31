@@ -1,0 +1,12 @@
+include README.md
+include README.en.md
+include README.zh-TW.md
+include CHANGELOG.md
+include CONTRIBUTING.md
+include LICENSE
+include requirements.txt
+recursive-include examples *
+recursive-include docs *
+recursive-include scripts *
+recursive-include src *.py
+global-exclude __pycache__ *.py[cod]

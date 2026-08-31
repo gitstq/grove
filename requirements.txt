@@ -1,0 +1,11 @@
+# Grove has ZERO runtime third-party dependencies — the Python standard
+# library and a system `git` executable are all you need.
+#
+# This file exists so conventional tooling has an explicit, empty dependency
+# contract. Nothing to install for normal use:
+#
+#     pip install grove-wt
+#
+# To BUILD a wheel/sdist you additionally need a build frontend (dev only):
+#   pip install build
+#   python -m build
